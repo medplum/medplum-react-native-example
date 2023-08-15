@@ -2,7 +2,7 @@
 
 This is a basic starter app that demonstrates how to sign into Medplum with React Native.
 
-This only demonstrates React Native in "web" mode. Android and iOS are out of scope.
+This demonstrates React Native in "web" mode with the platform file of `App.web.js` as well as the React Native mobile capability using the Medplum SDK `post` and `get` methods to accomplish authentication and retrieving profile.
 
 ## Setup
 
@@ -67,7 +67,7 @@ return (
 
 ### Sign in button
 
-Clicking on the "Sign in" button will executes the `startLogin` function:
+Clicking on the "Sign in" button will executes the `startLogin` function when in web mode, or the equivalent `auth/login` for android and iOS:
 
 ```js
 function startLogin() {
@@ -75,9 +75,17 @@ function startLogin() {
 }
 ```
 
+```js
+function startLogin() {
+  medplum
+    .post("auth/login", { email, password, clientId })
+    .then(handleAuthResponse);
+}
+```
+
 ### Sign in response
 
-There are two successful response types from `startLogin`:
+There are two successful response types from `startLogin` or `auth/login`:
 
 1. If the user only has one matching profile, the response includes `code` for OAuth token exchange.
 2. If the user has multiple profiles, the response includes `memberships` with project membership and profile details.
@@ -105,13 +113,14 @@ function handleAuthResponse(response) {
 
 ### Token exchange
 
-Now that we have a `code`, we can follow OAuth token exchange. Call `processCode` to exchange the `code` for an access token:
+Now that we have a `code`, we can follow OAuth token exchange. Call `processCode` to exchange the `code` for an access token on web or make a post request to `oauth2/token`:
 
 ```js
 function handleCode(code) {
   medplum.processCode(code).then(setProfile);
 }
 ```
+
 
 `processCode` sets the access token in `MedplumClient` and returns the user's profile resource.
 
