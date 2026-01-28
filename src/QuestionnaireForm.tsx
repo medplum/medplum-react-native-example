@@ -1,4 +1,10 @@
-import { Questionnaire, QuestionnaireItem, QuestionnaireResponseItemAnswer, Reference } from '@medplum/fhirtypes';
+import {
+  Questionnaire,
+  QuestionnaireItem,
+  QuestionnaireResponseItem,
+  QuestionnaireResponseItemAnswer,
+  Reference,
+} from '@medplum/fhirtypes';
 import {
   isQuestionEnabled,
   QuestionnaireFormState,
@@ -6,7 +12,7 @@ import {
   useQuestionnaireForm,
   useMedplum,
 } from '@medplum/react-hooks';
-import { JSX, useState } from 'react';
+import { JSX, useCallback, useReducer, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -27,9 +33,16 @@ export default function QuestionnaireForm({ questionnaire, onSubmit }: Questionn
   const medplum = useMedplum();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+
+  const handleChange = useCallback(() => {
+    // Force re-render when answers change
+    forceUpdate();
+  }, []);
 
   const state = useQuestionnaireForm({
     questionnaire,
+    onChange: handleChange,
   });
 
   if (state.loading) {
@@ -57,7 +70,7 @@ export default function QuestionnaireForm({ questionnaire, onSubmit }: Questionn
   if (submitted) {
     return (
       <View style={styles.submittedContainer}>
-        <Text style={styles.submittedText}>✓ Questionnaire submitted successfully!</Text>
+        <Text style={styles.submittedText}>Questionnaire submitted successfully!</Text>
       </View>
     );
   }
@@ -69,15 +82,12 @@ export default function QuestionnaireForm({ questionnaire, onSubmit }: Questionn
         <Text style={styles.description}>{state.questionnaire.description}</Text>
       )}
       <View style={styles.itemsContainer}>
-        {state.items.map((item, index) => (
-          <QuestionnaireItemComponent
-            key={item.linkId}
-            item={item}
-            state={state}
-            responseItems={state.responseItems}
-            index={index}
-          />
-        ))}
+        <QuestionnaireFormItemArray
+          items={state.items}
+          responseItems={state.responseItems}
+          context={[]}
+          state={state}
+        />
       </View>
       <TouchableOpacity
         style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
@@ -94,38 +104,69 @@ export default function QuestionnaireForm({ questionnaire, onSubmit }: Questionn
   );
 }
 
-interface QuestionnaireItemComponentProps {
-  item: QuestionnaireItem;
+interface QuestionnaireFormItemArrayProps {
+  items: QuestionnaireItem[];
+  responseItems: QuestionnaireResponseItem[];
+  context: QuestionnaireResponseItem[];
   state: Exclude<QuestionnaireFormState, { loading: true }>;
-  responseItems: any[];
-  index: number;
 }
 
-function QuestionnaireItemComponent({
-  item,
-  state,
+function QuestionnaireFormItemArray({
+  items,
   responseItems,
-  index,
-}: QuestionnaireItemComponentProps): JSX.Element | null {
-  if (!isQuestionEnabled(item, state.questionnaireResponse)) {
-    return null;
-  }
+  context,
+  state,
+}: QuestionnaireFormItemArrayProps): JSX.Element {
+  return (
+    <>
+      {items.map((item) => {
+        if (!isQuestionEnabled(item, state.questionnaireResponse)) {
+          return null;
+        }
 
-  const responseItem = responseItems[index];
+        // Find matching response items by linkId
+        const matchingResponseItems = responseItems.filter((ri) => ri.linkId === item.linkId);
+        const responseItem = matchingResponseItems[0];
 
+        return (
+          <QuestionnaireFormItemComponent
+            key={item.linkId}
+            item={item}
+            responseItem={responseItem}
+            context={context}
+            state={state}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+interface QuestionnaireFormItemComponentProps {
+  item: QuestionnaireItem;
+  responseItem: QuestionnaireResponseItem | undefined;
+  context: QuestionnaireResponseItem[];
+  state: Exclude<QuestionnaireFormState, { loading: true }>;
+}
+
+function QuestionnaireFormItemComponent({
+  item,
+  responseItem,
+  context,
+  state,
+}: QuestionnaireFormItemComponentProps): JSX.Element | null {
   if (item.type === QuestionnaireItemType.group) {
     return (
       <View style={styles.groupContainer}>
-        <Text style={styles.groupTitle}>{item.text}</Text>
-        {item.item?.map((childItem, childIndex) => (
-          <QuestionnaireItemComponent
-            key={childItem.linkId}
-            item={childItem}
+        {item.text && <Text style={styles.groupTitle}>{item.text}</Text>}
+        {item.item && responseItem?.item && (
+          <QuestionnaireFormItemArray
+            items={item.item}
+            responseItems={responseItem.item}
+            context={[...context, responseItem]}
             state={state}
-            responseItems={responseItem?.item || []}
-            index={childIndex}
           />
-        ))}
+        )}
       </View>
     );
   }
@@ -146,9 +187,9 @@ function QuestionnaireItemComponent({
       </Text>
       <QuestionInput
         item={item}
-        state={state}
-        responseItems={responseItems}
         responseItem={responseItem}
+        context={context}
+        state={state}
       />
     </View>
   );
@@ -156,16 +197,16 @@ function QuestionnaireItemComponent({
 
 interface QuestionInputProps {
   item: QuestionnaireItem;
+  responseItem: QuestionnaireResponseItem | undefined;
+  context: QuestionnaireResponseItem[];
   state: Exclude<QuestionnaireFormState, { loading: true }>;
-  responseItems: any[];
-  responseItem: any;
 }
 
-function QuestionInput({ item, state, responseItems, responseItem }: QuestionInputProps): JSX.Element {
+function QuestionInput({ item, responseItem, context, state }: QuestionInputProps): JSX.Element {
   const currentAnswer = responseItem?.answer?.[0];
 
   const handleChange = (answer: QuestionnaireResponseItemAnswer[]): void => {
-    state.onChangeAnswer(responseItems, item, answer);
+    state.onChangeAnswer(context, item, answer);
   };
 
   switch (item.type) {
@@ -176,6 +217,9 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
             value={currentAnswer?.valueBoolean ?? false}
             onValueChange={(value) => handleChange([{ valueBoolean: value }])}
           />
+          <Text style={styles.booleanLabel}>
+            {currentAnswer?.valueBoolean ? 'Yes' : 'No'}
+          </Text>
         </View>
       );
 
@@ -189,8 +233,8 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
             const num = parseFloat(text);
             if (!isNaN(num)) {
               handleChange([{ valueDecimal: num }]);
-            } else if (text === '') {
-              handleChange([]);
+            } else if (text === '' || text === '-' || text === '.') {
+              handleChange([{}]);
             }
           }}
           placeholder="Enter a number"
@@ -208,8 +252,8 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
             const num = parseInt(text, 10);
             if (!isNaN(num)) {
               handleChange([{ valueInteger: num }]);
-            } else if (text === '') {
-              handleChange([]);
+            } else if (text === '' || text === '-') {
+              handleChange([{}]);
             }
           }}
           placeholder="Enter a whole number"
@@ -222,7 +266,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
         <TextInput
           style={styles.input}
           value={currentAnswer?.valueDate ?? ''}
-          onChangeText={(text) => handleChange([{ valueDate: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueDate: text }] : [{}])}
           placeholder="YYYY-MM-DD"
           placeholderTextColor="#999"
         />
@@ -233,7 +277,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
         <TextInput
           style={styles.input}
           value={currentAnswer?.valueDateTime ?? ''}
-          onChangeText={(text) => handleChange([{ valueDateTime: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueDateTime: text }] : [{}])}
           placeholder="YYYY-MM-DDTHH:MM:SS"
           placeholderTextColor="#999"
         />
@@ -244,7 +288,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
         <TextInput
           style={styles.input}
           value={currentAnswer?.valueTime ?? ''}
-          onChangeText={(text) => handleChange([{ valueTime: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueTime: text }] : [{}])}
           placeholder="HH:MM:SS"
           placeholderTextColor="#999"
         />
@@ -255,7 +299,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
         <TextInput
           style={styles.input}
           value={currentAnswer?.valueString ?? ''}
-          onChangeText={(text) => handleChange([{ valueString: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueString: text }] : [{}])}
           placeholder="Enter text"
           placeholderTextColor="#999"
         />
@@ -268,7 +312,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
           multiline
           numberOfLines={4}
           value={currentAnswer?.valueString ?? ''}
-          onChangeText={(text) => handleChange([{ valueString: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueString: text }] : [{}])}
           placeholder="Enter text"
           placeholderTextColor="#999"
         />
@@ -281,7 +325,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
           keyboardType="url"
           autoCapitalize="none"
           value={currentAnswer?.valueUri ?? ''}
-          onChangeText={(text) => handleChange([{ valueUri: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueUri: text }] : [{}])}
           placeholder="https://example.com"
           placeholderTextColor="#999"
         />
@@ -302,7 +346,7 @@ function QuestionInput({ item, state, responseItems, responseItem }: QuestionInp
         <TextInput
           style={styles.input}
           value={currentAnswer?.valueString ?? ''}
-          onChangeText={(text) => handleChange([{ valueString: text }])}
+          onChangeText={(text) => handleChange(text ? [{ valueString: text }] : [{}])}
           placeholder="Enter value"
           placeholderTextColor="#999"
         />
@@ -376,6 +420,7 @@ function ChoiceInput({ item, currentAnswer, onChangeAnswer }: ChoiceInputProps):
           key={getOptionValue(option) || index}
           style={[styles.choiceOption, isSelected(option) && styles.choiceOptionSelected]}
           onPress={() => handleSelect(option)}
+          activeOpacity={0.7}
         >
           <View style={[styles.radioOuter, isSelected(option) && styles.radioOuterSelected]}>
             {isSelected(option) && <View style={styles.radioInner} />}
@@ -478,6 +523,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  booleanLabel: {
+    marginLeft: 10,
+    fontSize: 15,
+    color: '#212529',
+  },
   choiceContainer: {
     gap: 8,
   },
@@ -489,6 +539,7 @@ const styles = StyleSheet.create({
     borderColor: '#ced4da',
     borderRadius: 6,
     backgroundColor: '#fff',
+    marginBottom: 8,
   },
   choiceOptionSelected: {
     borderColor: '#0066cc',
@@ -516,6 +567,7 @@ const styles = StyleSheet.create({
   choiceText: {
     fontSize: 15,
     color: '#212529',
+    flex: 1,
   },
   choiceTextSelected: {
     color: '#0066cc',
