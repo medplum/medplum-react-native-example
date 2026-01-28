@@ -1,10 +1,11 @@
 import { LoginAuthenticationResponse, getDisplayString } from '@medplum/core';
 import { Patient } from '@medplum/fhirtypes';
-import { useMedplum, useMedplumContext, useMedplumProfile, useSubscription } from '@medplum/react-hooks';
+import { useMedplum, useMedplumContext, useMedplumProfile, useSearchOne, useSubscription } from '@medplum/react-hooks';
 import { StatusBar } from 'expo-status-bar';
 import { JSX, useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import CustomButton from './CustomButton';
+import QuestionnaireForm from './QuestionnaireForm';
 
 export default function Home(): JSX.Element {
   const medplum = useMedplum();
@@ -14,6 +15,12 @@ export default function Home(): JSX.Element {
   const [password, setPassword] = useState('');
   const [patients, setPatients] = useState<Patient[]>();
   const [lastName, setLastName] = useState('');
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+
+  // Fetch questionnaire from Medplum server by identifier
+  const [questionnaire, questionnaireLoading] = useSearchOne('Questionnaire', {
+    identifier: 'https://fsh.health/questionnaires|hra-questionnaire-123',
+  });
 
   function startLogin(): void {
     medplum.startLogin({ email, password }).then(handleAuthResponse).catch(console.error);
@@ -93,35 +100,60 @@ export default function Home(): JSX.Element {
             <View style={styles.authedWrapper}>
               <Text style={styles.loginText}>Logged in as {getDisplayString(profile)}</Text>
               <CustomButton onPress={signOut} title="Sign out" />
-              <View style={styles.marginTop10}>
-                <TextInput
-                  style={{ ...styles.input, marginTop: 10 }}
-                  placeholder="Mary's Last Name"
-                  placeholderTextColor="#003f5c"
-                  onChangeText={(lastName) => setLastName(lastName)}
-                  value={lastName}
-                />
-                <CustomButton onPress={createNewMary} title="Create New Mary" />
-                <CustomButton style={styles.marginTop10} onPress={searchForMary} title="Search for Mary" />
-                <ScrollView style={styles.scrollView}>
+              <CustomButton
+                style={styles.marginTop10}
+                onPress={() => setShowQuestionnaire(!showQuestionnaire)}
+                title={showQuestionnaire ? 'Hide Questionnaire' : 'Show Questionnaire'}
+              />
+              {showQuestionnaire ? (
+                <View style={styles.questionnaireWrapper}>
+                  {questionnaireLoading ? (
+                    <ActivityIndicator />
+                  ) : questionnaire ? (
+                    <QuestionnaireForm
+                      questionnaire={questionnaire}
+                      onSubmit={(response) => {
+                        console.log('Questionnaire submitted:', response);
+                        setShowQuestionnaire(false);
+                      }}
+                    />
+                  ) : (
+                    <Text style={styles.errorText}>Questionnaire not found</Text>
+                  )}
+                </View>
+              ) : (
+                <>
                   <View style={styles.marginTop10}>
-                    {patients &&
-                      (patients.length ? (
-                        patients.map((patient) => {
-                          const lastName = patient.name?.[0]?.family;
-                          return (
-                            <Text key={patient.id as string} style={styles.name}>
-                              Mary {lastName}
-                            </Text>
-                          );
-                        })
-                      ) : (
-                        <Text>No patients with first name "Mary" found.</Text>
-                      ))}
+                    <TextInput
+                      style={{ ...styles.input, marginTop: 10 }}
+                      placeholder="Mary's Last Name"
+                      placeholderTextColor="#003f5c"
+                      onChangeText={(lastName) => setLastName(lastName)}
+                      value={lastName}
+                    />
+                    <CustomButton onPress={createNewMary} title="Create New Mary" />
+                    <CustomButton style={styles.marginTop10} onPress={searchForMary} title="Search for Mary" />
+                    <ScrollView style={styles.scrollView}>
+                      <View style={styles.marginTop10}>
+                        {patients &&
+                          (patients.length ? (
+                            patients.map((patient) => {
+                              const lastName = patient.name?.[0]?.family;
+                              return (
+                                <Text key={patient.id as string} style={styles.name}>
+                                  Mary {lastName}
+                                </Text>
+                              );
+                            })
+                          ) : (
+                            <Text>No patients with first name "Mary" found.</Text>
+                          ))}
+                      </View>
+                    </ScrollView>
                   </View>
-                </ScrollView>
-              </View>
-              <NotificationsWidgit title="New Marys created:" criteria="Patient?name=Mary" />
+                  <NotificationsWidgit title="New Marys created:" criteria="Patient?name=Mary" />
+                </>
+              )}
             </View>
           )}
           <StatusBar style="auto" />
@@ -193,7 +225,13 @@ const styles = StyleSheet.create({
   },
   authedWrapper: {
     marginTop: 10,
-    height: '60%',
+    height: '80%',
+    width: '100%',
+    paddingHorizontal: 20,
+  },
+  questionnaireWrapper: {
+    flex: 1,
+    marginTop: 10,
   },
   input: {
     minWidth: 200,
@@ -222,5 +260,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderRadius: 5,
     padding: 5,
+  },
+  errorText: {
+    color: '#dc3545',
+    textAlign: 'center',
+    marginTop: 20,
   },
 });
